@@ -130,6 +130,36 @@ class Notice extends \Core\Model\Model {
                 'send_time' => time() - 86400 * 7
             ]);
         }
+		//检查是否有逾期任务且今天尚未通知的，立刻发送邮件通知(不管是否设置了邮件通知)
+		$msql = new \Core\Db\Mysql();
+		//需要在pes_task中添加一个字段overdue_remind_time，数据类型为int(11)，存放逾期邮件通知时间（避免当天重复发送通知）
+        $sql = 'SELECT task_id,task_title,user_mail from pes_task as t 
+		left join pes_user as u on t.task_project_id=u.user_id where task_delete = 0 
+		and t.task_status < 4 and t.task_complete_time = 0 and task_end_time < UNIX_TIMESTAMP()
+		AND (UNIX_TIMESTAMP() - overdue_remind_time)/86400 >= 1';
+        $res = $msql->getAll($sql);
+		$tm=time();
+		$homeurl=\Model\Content::findContent('option', 'domain', 'option_name')['value'];
+		$homeroot=$_SERVER['REQUEST_URI'];
+		$homefile=self::url('Team-Task-view', ['id' => '']);
+        //笨办法获取到通知中的任务超链接地址
+		$mailref=str_replace('Expand/Cli/SendNotice.phpDOCUMENT_ROOT','Public', $homeurl . $homeroot . $homefile);
+		foreach( $res as $rowdata )
+		{
+			$email=array();
+			$usermail=$rowdata['user_mail'];
+			$task_title=$rowdata['task_title'];
+			$send_content=$email['send_content'];
+			$task_id=$rowdata['task_id'];
+			$email['send_account']=$usermail;
+			$email['send_title']="{$task_title}任务已超期";
+			//$email['send_content']="<a href=\"http://yourip/PESCMS-TEAM/Public/?g=Team&m=Task&a=view&id={$task_id}\">{$task_title}</a>任务已超期，请立即登录系统完成执行!";
+			$email['send_content']="<a href=\"{$mailref}{$task_id}\">{$task_title}</a>任务已超期，请立即登录系统完成执行!";
+			$email['send_id']=0;
+			(new \Expand\Notice\Mail())->send($email);
+			//标记为今天已发送过，避免重复发送
+			$msql->query("update pes_task set overdue_remind_time={$tm} where task_id='{$task_id}'");
+        
     }
 
 }
